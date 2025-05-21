@@ -1,0 +1,689 @@
+---
+title: "Testing effect of Floral constancy, cost of switching and unequal reward abundnace on foraging energetics"
+output: html_notebook
+---
+
+
+Testing effect of Floral constancy, cost of switching and unequal reward abundnace on foraging energetics
+
+#unequal abundance, no cost of switching
+
+Analysis 1:
+
+First, randomly taking 10000 pollinator visits with CI ranging from 0 to 1
+RW: rare moreph with high nectar reward.
+GR and GW are common morephs with low rewards.
+Here morphs can be replaced by 'Species'.
+
+```{r}
+# Define the number of visits
+n_visits <- 60
+
+# Define the total number of plants
+n_plants <- 1000
+
+# Define the plant species proportions
+plant_species_proportions <- c(RW = 0.1, GR = 0.3, GW = 0.6)
+
+# Define the energy gained from each plant species
+plant_species_energy <- c(RW = 35, GR = 20, GW = 15)
+
+# Define a function to simulate a foraging bout
+simulate_foraging_bout <- function(n_visits, n_plants, plant_species_proportions, CI_range) {
+  # Initialize the visit sequence
+  visit_sequence <- character(n_visits)
+  
+  # Initialize the CI value
+  CI <- 0
+  
+  # Simulate the foraging bout
+  while (CI < CI_range[1] || CI > CI_range[2]) {
+    for (i in seq_len(n_visits)) {
+      # Draw a random plant species according to the proportions
+      visit_sequence[i] <- sample(names(plant_species_proportions), size = 1, prob = plant_species_proportions * n_plants)
+    }
+    
+    # Count the number of constant and nonconstant transitions
+    n_constant_transitions <- sum(visit_sequence[-1] == visit_sequence[-n_visits])
+    n_nonconstant_transitions <- sum(visit_sequence[-1] != visit_sequence[-n_visits])
+    
+    # Calculate the CI value
+    CI <- n_constant_transitions / (n_constant_transitions + n_nonconstant_transitions)
+  }
+  
+  # Return the visit sequence and the CI value
+  list(visit_sequence = visit_sequence, CI = CI)
+}
+
+# Define the number of pollinators
+n_pollinators <- 10000
+
+# Initialize the output data frame
+output_df <- data.frame(
+  pollinator_ID = seq_len(n_pollinators),
+  CI = numeric(n_pollinators),
+  visits_to_GW = integer(n_pollinators),
+  visits_to_GR = integer(n_pollinators),
+  visits_to_RW = integer(n_pollinators),
+  total_calories_gained = numeric(n_pollinators),
+  visit_sequence = I(replicate(n_pollinators, character(n_visits), simplify = FALSE))
+)
+
+# Simulate foraging bouts for each pollinator with a CI value in the range of 0.1 to 0.2
+for (i in seq_len(n_pollinators)) {
+  result <- simulate_foraging_bout(n_visits, n_plants, plant_species_proportions, CI_range = c(0.00001, 1.0))
+  
+  # Store the result in the output data frame
+  output_df$CI[i] <- result$CI
+  output_df$visits_to_GW[i] <- sum(result$visit_sequence == "GW")
+  output_df$visits_to_GR[i] <- sum(result$visit_sequence == "GR")
+  output_df$visits_to_RW[i] <- sum(result$visit_sequence == "RW")
+  
+  # Calculate and store the total calories gained by this pollinator
+  output_df$total_calories_gained[i] <- sum(plant_species_energy[result$visit_sequence])
+  
+  output_df$visit_sequence[[i]] <- result$visit_sequence
+}
+
+# Write the output data frame to a file
+#write.csv(output_df, file = "output_nectar_all.csv", row.names = FALSE)
+
+
+#save output_df as unique dataframe to use it in future
+output_nectar_all <- output_df 
+
+```
+
+
+Plotting
+1. Probability of visiting RW vs CI: Graph II
+Hypothesis: Probability of finding a rare morph/species should decrease as floral constancy increases.
+
+```{r}
+library(ggplot2)
+library(extrafont)
+library(ggExtra)
+
+p = ggplot(output_nectar_all, aes(x= CI, y=visits_to_RW))+ 
+  geom_point()+
+  geom_smooth(method=lm, color="black", linetype="dashed", linewidth = 0.5)+
+  
+  #titles
+  xlab("Floral constancy (CI)") + 
+  ylab("Number of visits to rare species (A)")+
+  
+  #axis
+  xlim(0,1)+
+  
+
+  #Theme
+  theme_bw()+
+  theme(text=element_text(family="Times New Roman"))
+  
+
+p
+
+ggsave("Graph II_Number of visits to rare species vs CI_unequal abundance.png", p, units = "in", width = 6, height = 4.5, dpi = 300)
+```
+
+Pearson correlation test
+```{r}
+res <- cor.test(output_nectar_all$CI, output_nectar_all$visits_to_RW, 
+                    method = "pearson")
+res
+```
+
+2. Total energy gained vs CI
+Not needed
+
+
+```{r}
+library(ggplot2)
+library(extrafont)
+
+p = ggplot(output_nectar_all, aes(x=CI, y=total_calories_gained))+ 
+  geom_point(size = 0.2)+
+  geom_smooth(method=lm, color="black", linetype="dashed", linewidth = 0.5)+
+  
+  #titles
+  xlab("Floral constancy (CI)") + 
+  ylab("Total reward gained")+
+
+  #axis
+  xlim(0,1)+
+  
+  #Theme
+  theme_bw()+
+  theme(text=element_text(family="Times New Roman"))
+
+p
+
+ggsave("Graph IV_Floral reward gained vs floral constancy_unequal abundance.png", p, units = "in", width = 8, height = 5, dpi = 300)
+```
+
+
+Pearson correlation test
+```{r}
+res <- cor.test(output_nectar_all$CI, output_nectar_all$total_calories_gained, 
+                    method = "pearson")
+res
+```
+
+
+## Adding the cost of switching
+
+Adding cost of switching in this:
+switching to RW = 10 units
+switching to GR and GW = 5 units
+
+1. With unequal abundance
+
+Codes with five different switching costs:
+1/10th, 1/5th, 1/4th, 1/3rd, 1/2nd of their initial floral reward energy
+
+
+```{r}
+# Define the number of visits
+n_visits <- 60
+
+# Define the total number of plants
+n_plants <- 1000
+
+# Define the plant species proportions
+plant_species_proportions <- c(RW = 0.1, GR = 0.3, GW = 0.6)
+
+# Define the energy gained from each plant species
+plant_species_energy <- c(RW = 35, GR = 20, GW = 15)
+
+# Define the fractions for the cost of switching
+switching_cost_fractions <- c(0,1/10, 1/5, 1/4, 1/3, 1/2)
+
+# Define the number of pollinators
+n_pollinators <- 10000
+
+# Loop over each switching cost fraction
+for (fraction in switching_cost_fractions) {
+  # Define the cost of switching as a fraction of the initial energy values
+  switching_cost <- plant_species_energy * fraction
+
+  # Define a function to simulate a foraging bout
+  simulate_foraging_bout <- function(n_visits, n_plants, plant_species_proportions, CI_range) {
+    # Initialize the visit sequence
+    visit_sequence <- character(n_visits)
+    
+    # Initialize the CI value
+    CI <- 0
+    
+    # Initialize the total energy gained
+    total_energy_gained <- 0
+    
+    # Simulate the foraging bout
+    while (CI < CI_range[1] || CI > CI_range[2]) {
+      for (i in seq_len(n_visits)) {
+        # Draw a random plant species according to the proportions
+        visit_sequence[i] <- sample(names(plant_species_proportions), size = 1, prob = plant_species_proportions * n_plants)
+        
+        # Add the energy gained from this visit, subtracting the switching cost
+        total_energy_gained <- total_energy_gained + plant_species_energy[visit_sequence[i]] - ifelse(i > 1 && visit_sequence[i] != visit_sequence[i - 1], switching_cost[visit_sequence[i]], 0)
+      }
+      
+      # Count the number of constant and nonconstant transitions
+      n_constant_transitions <- sum(visit_sequence[-1] == visit_sequence[-n_visits])
+      n_nonconstant_transitions <- sum(visit_sequence[-1] != visit_sequence[-n_visits])
+      
+      # Calculate the CI value
+      CI <- n_constant_transitions / (n_constant_transitions + n_nonconstant_transitions)
+    }
+    
+    # Return the visit sequence, the CI value, and the total energy gained
+    list(visit_sequence = visit_sequence, CI = CI, total_energy_gained = total_energy_gained)
+  }
+
+  # Initialize the output data frame
+  output_df <- data.frame(
+    pollinator_ID = seq_len(n_pollinators),
+    CI = numeric(n_pollinators),
+    visits_to_GW = integer(n_pollinators),
+    visits_to_GR = integer(n_pollinators),
+    visits_to_RW = integer(n_pollinators),
+    total_calories_gained = numeric(n_pollinators),
+    visit_sequence = I(replicate(n_pollinators, character(n_visits), simplify = FALSE))
+  )
+
+  # Simulate foraging bouts for each pollinator with a CI value in the range of 0.1 to 0.2
+  for (i in seq_len(n_pollinators)) {
+    result <- simulate_foraging_bout(n_visits, n_plants, plant_species_proportions, CI_range = c(0.00001, 1.0))
+    
+    # Store the result in the output data frame
+    output_df$CI[i] <- result$CI
+    output_df$visits_to_GW[i] <- sum(result$visit_sequence == "GW")
+    output_df$visits_to_GR[i] <- sum(result$visit_sequence == "GR")
+    output_df$visits_to_RW[i] <- sum(result$visit_sequence == "RW")
+    
+    # Store the total calories gained by this pollinator
+    output_df$total_calories_gained[i] <- result$total_energy_gained
+    
+    output_df$visit_sequence[[i]] <- result$visit_sequence
+  }
+
+  # Save the output data frame in a unique variable
+  assign(paste0("output_nectar_all_", fraction), output_df, envir = .GlobalEnv)
+}
+
+
+```
+
+
+
+PLotting
+
+doing the ggplot way
+```{r}
+library(ggplot2)
+library(extrafont)
+library(gridExtra)
+library(dplyr)
+library(tidyr)
+
+# Create an empty data frame to store the combined data
+combined_df <- data.frame()
+
+# Loop over each switching cost fraction
+for (fraction in switching_cost_fractions) {
+  # Get the output data frame for this fraction
+  output_df <- get(paste0("output_nectar_all_", fraction))
+  
+  # Add a column for the fraction
+  output_df$fraction <- fraction
+  
+  # Combine the data frames
+  combined_df <- rbind(combined_df, output_df)
+}
+
+# Reshape the combined data frame to a long format
+combined_df_long <- combined_df %>%
+  gather(key = "variable", value = "value", -pollinator_ID, -CI, -visit_sequence, -fraction)
+
+#keeping only total_calories_gained
+combined_df_long = combined_df_long[combined_df_long$variable == 'total_calories_gained',]
+
+# Create a faceted plot
+p <- ggplot(combined_df_long, aes(x=CI, y=value)) + 
+  geom_point(size = 0.2) +
+  geom_smooth(method=lm, color="black", linetype="dashed", linewidth = 0.5) +
+  facet_grid(. ~ fraction)+
+  xlab("Floral constancy (CI)") + 
+  ylab("Total reward gained") +
+  ggtitle("reward gained vs CI for different costs of switching for unequal abd")+
+  theme_bw() +
+  theme(text=element_text(family="Times New Roman"))
+
+p
+
+ggsave("Graph VI_Floral reward gained vs floral constancy_unequal abundance.png", p, units = "in", width = 10, height = 5, dpi = 300)
+```
+
+Running tests
+```{r}
+# Define the fractions for the cost of switching
+switching_cost_fractions <- c(0,1/10, 1/5, 1/4, 1/3, 1/2)
+
+# Loop over each switching cost fraction
+for (fraction in switching_cost_fractions) {
+  # Get the output data frame for this fraction
+  output_df <- get(paste0("output_nectar_all_", fraction))
+  
+  # Perform the Pearson's correlation test
+  res <- cor.test(output_df$CI, output_df$total_calories_gained, method = "pearson")
+  
+  # Print the result
+  print(paste0("Fraction: ", fraction))
+  print(res)
+}
+
+```
+
+
+Trying:
+```{r}
+# Subset the data where CI is approximately 0.5
+df_subset <- combined_df[abs(combined_df$CI - 0.5) < 0.01, c(2,5,6,8)]
+
+# Calculate descriptive statistics
+summary(df_subset)
+
+# Calculate correlations
+cor(df_subset)
+
+# Perform regression analysis
+model <- lm(total_calories_gained ~ CI + fraction + visits_to_RW, data = df_subset)
+summary(model)
+
+```
+
+
+
+#equal abundance but no cost of switching
+
+Same code as the first one, but with equal morph abundance and unequal reward.
+```{r}
+# Define the number of visits
+n_visits <- 60
+
+# Define the total number of plants
+n_plants <- 1000
+
+# Define the plant species proportions
+plant_species_proportions <- c(RW = 0.33333333, GR = 0.33333333, GW = 0.33333333)
+
+# Define the energy gained from each plant species
+plant_species_energy <- c(RW = 35, GR = 20, GW = 15)
+
+# Define a function to simulate a foraging bout
+simulate_foraging_bout <- function(n_visits, n_plants, plant_species_proportions, CI_range) {
+  # Initialize the visit sequence
+  visit_sequence <- character(n_visits)
+  
+  # Initialize the CI value
+  CI <- 0
+  
+  # Simulate the foraging bout
+  while (CI < CI_range[1] || CI > CI_range[2]) {
+    for (i in seq_len(n_visits)) {
+      # Draw a random plant species according to the proportions
+      visit_sequence[i] <- sample(names(plant_species_proportions), size = 1, prob = plant_species_proportions * n_plants)
+    }
+    
+    # Count the number of constant and nonconstant transitions
+    n_constant_transitions <- sum(visit_sequence[-1] == visit_sequence[-n_visits])
+    n_nonconstant_transitions <- sum(visit_sequence[-1] != visit_sequence[-n_visits])
+    
+    # Calculate the CI value
+    CI <- n_constant_transitions / (n_constant_transitions + n_nonconstant_transitions)
+  }
+  
+  # Return the visit sequence and the CI value
+  list(visit_sequence = visit_sequence, CI = CI)
+}
+
+# Define the number of pollinators
+n_pollinators <- 10000
+
+# Initialize the output data frame
+output_df <- data.frame(
+  pollinator_ID = seq_len(n_pollinators),
+  CI = numeric(n_pollinators),
+  visits_to_GW = integer(n_pollinators),
+  visits_to_GR = integer(n_pollinators),
+  visits_to_RW = integer(n_pollinators),
+  total_calories_gained = numeric(n_pollinators),
+  visit_sequence = I(replicate(n_pollinators, character(n_visits), simplify = FALSE))
+)
+
+# Simulate foraging bouts for each pollinator with a CI value in the range of 0.1 to 0.2
+for (i in seq_len(n_pollinators)) {
+  result <- simulate_foraging_bout(n_visits, n_plants, plant_species_proportions, CI_range = c(0.00001, 1.0))
+  
+  # Store the result in the output data frame
+  output_df$CI[i] <- result$CI
+  output_df$visits_to_GW[i] <- sum(result$visit_sequence == "GW")
+  output_df$visits_to_GR[i] <- sum(result$visit_sequence == "GR")
+  output_df$visits_to_RW[i] <- sum(result$visit_sequence == "RW")
+  
+  # Calculate and store the total calories gained by this pollinator
+  output_df$total_calories_gained[i] <- sum(plant_species_energy[result$visit_sequence])
+  
+  output_df$visit_sequence[[i]] <- result$visit_sequence
+}
+
+# Write the output data frame to a file
+#write.csv(output_df, file = "output_nectar_all.csv", row.names = FALSE)
+
+
+#save output_df as unique dataframe to use it in future
+output_nectar_all <- output_df 
+
+```
+
+Plotting
+1. Probability of visiting RW vs CI: Graph II
+```{r}
+library(ggplot2)
+library(extrafont)
+
+p = ggplot(output_nectar_all, aes(x= CI, y=visits_to_RW))+ 
+  geom_point()+
+  geom_smooth(method=lm, color="black", linetype="dashed", linewidth = 0.5)+
+  
+  #titles
+  xlab("Floral constancy (CI)") + 
+  ylab("Number of visits to rare species (A)")+
+  
+  #axis
+  xlim(0,1)+
+
+  #Theme
+  theme_bw()+
+  theme(text=element_text(family="Times New Roman"))
+
+p
+
+ggsave("Graph I_Number of visits to rare species vs CI_equal abundance.png", p, units = "in", width = 6, height = 4.5, dpi = 300)
+```
+
+
+Pearson correlation test
+```{r}
+res <- cor.test(output_nectar_all$CI, output_nectar_all$visits_to_RW, 
+                    method = "pearson")
+res
+```
+
+2. Total energy gained vs CI
+```{r}
+library(ggplot2)
+library(extrafont)
+
+p = ggplot(output_nectar_all, aes(x=CI, y=total_calories_gained))+ 
+  geom_point(size = 0.2)+
+  geom_smooth(method=lm, color="black", linetype="dashed", linewidth = 0.5)+
+  
+  #titles
+  xlab("Floral constancy (CI)") + 
+  ylab("Total reward gained")+
+
+  #axis
+  xlim(0,1)+
+  
+  #Theme
+  theme_bw()+
+  theme(text=element_text(family="Times New Roman"))
+
+p
+
+ggsave("Graph III_Floral reward gained vs floral constancy_equal abundance.png", p, units = "in", width = 8, height = 5, dpi = 300)
+```
+
+Pearson correlation test
+```{r}
+res <- cor.test(output_nectar_all$CI, output_nectar_all$total_calories_gained, 
+                    method = "pearson")
+res
+```
+
+
+## Adding the cost of switching (equal floral abundnace, unequal reward)
+
+Adding cost of switching in this:
+switching to RW = 10 units
+switching to GR and GW = 5 units
+
+1. With unequal abundance
+
+Codes with five different switching costs:
+0, 1/10th, 1/5th, 1/4th, 1/3rd, 1/2nd of their initial energy
+
+
+```{r}
+# Define the number of visits
+n_visits <- 60
+
+# Define the total number of plants
+n_plants <- 1000
+
+# Define the plant species proportions
+plant_species_proportions <- c(RW = 0.33333333, GR = 0.33333333, GW = 0.33333333)
+
+# Define the energy gained from each plant species
+plant_species_energy <- c(RW = 35, GR = 20, GW = 15)
+
+# Define the fractions for the cost of switching
+switching_cost_fractions <- c(0, 1/10, 1/5, 1/4, 1/3, 1/2)
+
+# Define the number of pollinators
+n_pollinators <- 10000
+
+# Loop over each switching cost fraction
+for (fraction in switching_cost_fractions) {
+  # Define the cost of switching as a fraction of the initial energy values
+  switching_cost <- plant_species_energy * fraction
+
+  # Define a function to simulate a foraging bout
+  simulate_foraging_bout <- function(n_visits, n_plants, plant_species_proportions, CI_range) {
+    # Initialize the visit sequence
+    visit_sequence <- character(n_visits)
+    
+    # Initialize the CI value
+    CI <- 0
+    
+    # Initialize the total energy gained
+    total_energy_gained <- 0
+    
+    # Simulate the foraging bout
+    while (CI < CI_range[1] || CI > CI_range[2]) {
+      for (i in seq_len(n_visits)) {
+        # Draw a random plant species according to the proportions
+        visit_sequence[i] <- sample(names(plant_species_proportions), size = 1, prob = plant_species_proportions * n_plants)
+        
+        # Add the energy gained from this visit, subtracting the switching cost
+        total_energy_gained <- total_energy_gained + plant_species_energy[visit_sequence[i]] - ifelse(i > 1 && visit_sequence[i] != visit_sequence[i - 1], switching_cost[visit_sequence[i]], 0)
+      }
+      
+      # Count the number of constant and nonconstant transitions
+      n_constant_transitions <- sum(visit_sequence[-1] == visit_sequence[-n_visits])
+      n_nonconstant_transitions <- sum(visit_sequence[-1] != visit_sequence[-n_visits])
+      
+      # Calculate the CI value
+      CI <- n_constant_transitions / (n_constant_transitions + n_nonconstant_transitions)
+    }
+    
+    # Return the visit sequence, the CI value, and the total energy gained
+    list(visit_sequence = visit_sequence, CI = CI, total_energy_gained = total_energy_gained)
+  }
+
+  # Initialize the output data frame
+  output_df <- data.frame(
+    pollinator_ID = seq_len(n_pollinators),
+    CI = numeric(n_pollinators),
+    visits_to_GW = integer(n_pollinators),
+    visits_to_GR = integer(n_pollinators),
+    visits_to_RW = integer(n_pollinators),
+    total_calories_gained = numeric(n_pollinators),
+    visit_sequence = I(replicate(n_pollinators, character(n_visits), simplify = FALSE))
+  )
+
+  # Simulate foraging bouts for each pollinator with a CI value in the range of 0.1 to 0.2
+  for (i in seq_len(n_pollinators)) {
+    result <- simulate_foraging_bout(n_visits, n_plants, plant_species_proportions, CI_range = c(0.00001, 1.0))
+    
+    # Store the result in the output data frame
+    output_df$CI[i] <- result$CI
+    output_df$visits_to_GW[i] <- sum(result$visit_sequence == "GW")
+    output_df$visits_to_GR[i] <- sum(result$visit_sequence == "GR")
+    output_df$visits_to_RW[i] <- sum(result$visit_sequence == "RW")
+    
+    # Store the total calories gained by this pollinator
+    output_df$total_calories_gained[i] <- result$total_energy_gained
+    
+    output_df$visit_sequence[[i]] <- result$visit_sequence
+  }
+
+  # Save the output data frame in a unique variable
+  assign(paste0("output_nectar_all_", fraction), output_df, envir = .GlobalEnv)
+}
+
+
+```
+
+
+
+
+Plotting with ggplot + for loop
+```{r}
+library(ggplot2)
+library(extrafont)
+library(gridExtra)
+library(dplyr)
+library(tidyr)
+
+# Create an empty data frame to store the combined data
+combined_df <- data.frame()
+
+# Loop over each switching cost fraction
+for (fraction in switching_cost_fractions) {
+  # Get the output data frame for this fraction
+  output_df <- get(paste0("output_nectar_all_", fraction))
+  
+  # Add a column for the fraction
+  output_df$fraction <- fraction
+  
+  # Combine the data frames
+  combined_df <- rbind(combined_df, output_df)
+}
+
+# Reshape the combined data frame to a long format
+combined_df_long <- combined_df %>%
+  gather(key = "variable", value = "value", -pollinator_ID, -CI, -visit_sequence, -fraction)
+
+#keeping only total_calories_gained
+combined_df_long = combined_df_long[combined_df_long$variable == 'total_calories_gained',]
+
+# Create a faceted plot
+p <- ggplot(combined_df_long, aes(x=CI, y=value)) + 
+  geom_point(size = 0.2) +
+  geom_smooth(method=lm, color="black", linetype="dashed", linewidth = 0.5) +
+  facet_grid(. ~ fraction)+
+  xlab("Floral constancy (CI)") + 
+  ylab("Total reward gained") +
+  ggtitle("reward gained vs CI for different costs of switching for equal abd")+
+  theme_bw() +
+  theme(text=element_text(family="Times New Roman"))
+
+p
+
+ggsave("Graph V_Floral reward gained vs floral constancy_equal abundance.png", p, units = "in", width = 10, height = 5, dpi = 300)
+```
+
+
+Running tests
+```{r}
+# Define the fractions for the cost of switching
+switching_cost_fractions <- c(0, 1/10, 1/5, 1/4, 1/3, 1/2)
+
+# Loop over each switching cost fraction
+for (fraction in switching_cost_fractions) {
+  # Get the output data frame for this fraction
+  output_df <- get(paste0("output_nectar_all_", fraction))
+  
+  # Perform the Pearson's correlation test
+  res <- cor.test(output_df$CI, output_df$total_calories_gained, method = "pearson")
+  
+  # Print the result
+  print(paste0("Fraction: ", fraction))
+  print(res)
+}
+
+```
+
+
+
